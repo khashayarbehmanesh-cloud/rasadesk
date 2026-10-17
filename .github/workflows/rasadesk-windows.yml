@@ -1,0 +1,12 @@
+name: RasaDesk - Windows build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: ./.github/workflows/flutter-build.yml
+    secrets: inherit
+    with:
+      upload-artifact: true
+      upload-tag: "rasadesk-latest"

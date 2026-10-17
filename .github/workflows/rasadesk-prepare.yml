@@ -1,0 +1,29 @@
+name: RasaDesk - apply branding
+
+# یک بار (یا بعد از هر همگام‌سازی با RustDesk) اجرا کنید؛ برندینگ را روی سورس اعمال و commit می‌کند.
+# بعد از آن workflow «Flutter Nightly Build» را اجرا کنید تا نسخه‌ی ویندوز ساخته شود.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  brand:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Apply branding
+        run: node rasadesk/client/apply-branding.js . rasadesk/client/brand.json
+      - name: Commit
+        run: |
+          git config user.name  "rasadesk-bot"
+          git config user.email "rasadesk-bot@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "RasaDesk: apply branding"
+          git push
