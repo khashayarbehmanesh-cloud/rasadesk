@@ -1,0 +1,14 @@
+{
+  "appName": "RasaDesk",
+  "displayName": "Rasa Desk",
+  "company": "Rasa Systems",
+  "org": "ir.rasa99",
+  "description": "Rasa Desk Remote Desktop",
+  "idServer": "remote.rasa99.ir",
+  "idServers": ["remote.rasa99.ir"],
+  "relayServer": "remote.rasa99.ir",
+  "serverKey": "utitV+Ge82tRFwQKSNY1hXCgj4VznQSsMbKRwtmFSrI=",
+  "adsBaseUrl": "https://remote.rasa99.ir/ads",
+  "requestAdUrl": "https://rasa99.ir/ticket"
+}
+
