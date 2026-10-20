@@ -414,8 +414,12 @@ jobs:
         # is x64 / ARM64; the produced Package.msi is globbed since its bin/<platform>/ dir varies.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
+          Copy-Item -Recurse ./rustdesk ./rustdesk-ras
+          Rename-Item ./rustdesk-ras/rustdesk.exe RasaDesk.exe
+          New-Item -ItemType Directory -Force ./res/msi/Package/Resources | Out-Null
+          Copy-Item ./rasadesk/client/branding/msi/*.bmp ./res/msi/Package/Resources/ -ErrorAction SilentlyContinue
           pushd ./res/msi
-          python preprocess.py --arp -d ../../rustdesk
+          python preprocess.py --arp -d ../../rustdesk-ras --app-name RasaDesk --manufacturer "Rasa Systems"
           nuget restore msi.sln
           $msiPlatform = if ('${{ matrix.job.arch }}' -eq 'aarch64') { 'ARM64' } else { 'x64' }
           msbuild msi.sln -p:Configuration=Release -p:Platform=$msiPlatform /p:TargetVersion=Windows10
