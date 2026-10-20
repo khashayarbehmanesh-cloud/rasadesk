@@ -20,10 +20,13 @@ const js = (s) => JSON.stringify(String(s)); // رشته‌ی امن برای Ru
 
 function patch(file, fn, label) {
   if (!fs.existsSync(file)) return fail(`${label}: file not found (${path.relative(root, file)})`);
-  const before = read(file);
+  // در ویندوز (CI) فایل‌ها با CRLF checkout می‌شوند؛ الگوها با LF نوشته شده‌اند، پس موقتاً به LF تبدیل می‌کنیم
+  const raw = read(file);
+  const crlf = raw.includes('\r\n');
+  const before = crlf ? raw.replace(/\r\n/g, '\n') : raw;
   const after = fn(before);
   if (after === null) return fail(`${label}: pattern not found`);
-  if (after !== before) write(file, after);
+  if (after !== before) write(file, crlf ? after.replace(/\n/g, '\r\n') : after);
   ok(label);
 }
 const replaceOnce = (re, to) => (s) => (re.test(s) ? s.replace(re, to) : null);
