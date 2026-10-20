@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
@@ -25,7 +27,10 @@ const Map<String, Map<String, String>> _kTr = {
 /// هر آگهی می‌تواند بنر، متن و دامنه‌ی مقصد داشته باشد؛ متن و دامنه لینک مستقیم به سایت تبلیغ‌دهنده است.
 /// اگر سرور در دسترس نباشد یا آگهی‌ای نباشد، فقط لینک «درخواست تبلیغ» دیده می‌شود.
 class RasaAdBanner extends StatefulWidget {
-  const RasaAdBanner({Key? key}) : super(key: key);
+  /// slot: 'bottom' (نوار افقی پایین صفحه) یا 'side' (ستون کنار، فقط وقتی آگهی داشته باشد)
+  const RasaAdBanner({Key? key, this.slot = 'bottom'}) : super(key: key);
+
+  final String slot;
 
   @override
   State<RasaAdBanner> createState() => _RasaAdBannerState();
@@ -50,10 +55,20 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
     _refresh = Timer.periodic(const Duration(minutes: 30), (_) => _load());
   }
 
+  // زبان خودِ برنامه: اگر کاربر در تنظیمات زبان انتخاب کرده همان، وگرنه زبان سیستم (مثل خود RustDesk)
+  String _detectLang() {
+    var l = '';
+    try {
+      l = bind.mainGetLocalOption(key: kCommConfKeyLang);
+    } catch (_) {}
+    if (l.isEmpty || l == 'default') l = localeName;
+    return l.split(RegExp('[-_]')).first.toLowerCase();
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final l = Localizations.localeOf(context).languageCode.toLowerCase();
+    final l = _detectLang();
     if (l != _lang || _ads.isEmpty) {
       _lang = l;
       _load();
@@ -72,7 +87,7 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
   Future<void> _load() async {
     try {
       final r = await http
-          .get(Uri.parse('$kRasaAdsBaseUrl/api/ads?lang=$_lang'))
+          .get(Uri.parse('$kRasaAdsBaseUrl/api/ads?lang=$_lang&slot=${widget.slot}'))
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return;
       final j = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
@@ -111,8 +126,72 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
     }
   }
 
+  // ستون کنار: بدون آگهی هیچ فضایی نمی‌گیرد؛ تصویر متحرک (GIF/WebP) خودکار پخش می‌شود
+  Widget _buildSide(BuildContext context) {
+    if (_ads.isEmpty) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final muted = Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6);
+    final ad = _ads[_index % _ads.length];
+    final click = '$kRasaAdsBaseUrl${ad['link']}';
+    final image = (ad['image'] ?? '').toString();
+    final title = (ad['title'] ?? '').toString();
+    final text = (ad['text'] ?? '').toString();
+    final host = (ad['host'] ?? '').toString();
+    final line = [title, text].where((s) => s.isNotEmpty).join(' — ');
+    return Container(
+      width: 200,
+      margin: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.withOpacity(0.25)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(_t('ad'), style: TextStyle(fontSize: 11, color: muted)),
+          const SizedBox(height: 6),
+          if (image.isNotEmpty)
+            InkWell(
+              onTap: () => _open(click),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.network(
+                  '$kRasaAdsBaseUrl$image',
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          if (line.isNotEmpty || host.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: InkWell(
+                onTap: () => _open(click),
+                child: Text.rich(
+                  TextSpan(children: [
+                    if (line.isNotEmpty) TextSpan(text: '$line  '),
+                    if (host.isNotEmpty)
+                      TextSpan(
+                        text: host,
+                        style: TextStyle(
+                            color: scheme.primary,
+                            decoration: TextDecoration.underline),
+                      ),
+                  ]),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (widget.slot == 'side') return _buildSide(context);
     final scheme = Theme.of(context).colorScheme;
     final muted = Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6);
     final children = <Widget>[];

@@ -40,7 +40,12 @@ ok('Dart: rasa_config.dart + rasa_ad_banner.dart');
 
 // ---- 2) نوار تبلیغات در صفحه‌ی اصلی دسکتاپ (پایین پنل راست)
 patch(p('flutter', 'lib', 'desktop', 'pages', 'desktop_home_page.dart'), (s) => {
-  if (s.includes('RasaAdBanner')) return s; // قبلاً اعمال شده
+  if (s.includes("RasaAdBanner(slot: 'side')")) return s; // آخرین نسخه قبلاً اعمال شده
+  if (s.includes('RasaAdBanner')) { // نسخه‌ی قبلی (فقط پایین) -> افزودن ستون کنار
+    const old = 'Expanded(child: ConnectionPage()),\n          const RasaAdBanner(),';
+    if (!s.includes(old)) return null;
+    return s.replace(old, "Expanded(\n            child: LayoutBuilder(\n              builder: (ctx, c) => Row(\n                crossAxisAlignment: CrossAxisAlignment.start,\n                children: [\n                  Expanded(child: ConnectionPage()),\n                  if (c.maxWidth >= 640) const RasaAdBanner(slot: 'side'),\n                ],\n              ),\n            ),\n          ),\n          const RasaAdBanner(),");
+  }
   let t = s.replace("import '../widgets/button.dart';",
     "import '../widgets/button.dart';\nimport 'package:flutter_hbb/common/widgets/rasa_ad_banner.dart';");
   const re = /buildRightPane\(BuildContext context\) \{\s*return Container\(\s*color: Theme\.of\(context\)\.scaffoldBackgroundColor,\s*child: ConnectionPage\(\),\s*\);\s*\}/;
@@ -50,7 +55,17 @@ patch(p('flutter', 'lib', 'desktop', 'pages', 'desktop_home_page.dart'), (s) => 
       color: Theme.of(context).scaffoldBackgroundColor,
       child: Column(
         children: [
-          Expanded(child: ConnectionPage()),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (ctx, c) => Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: ConnectionPage()),
+                  if (c.maxWidth >= 640) const RasaAdBanner(slot: 'side'),
+                ],
+              ),
+            ),
+          ),
           const RasaAdBanner(),
         ],
       ),
@@ -58,6 +73,12 @@ patch(p('flutter', 'lib', 'desktop', 'pages', 'desktop_home_page.dart'), (s) => 
   }`);
 }, 'Dart: ad banner in desktop_home_page');
 
+// ---- 2a) حذف «Powered by RustDesk» از ستون چپ صفحه اصلی دسکتاپ
+patch(p('flutter', 'lib', 'desktop', 'pages', 'desktop_home_page.dart'), (s) => {
+  const re = /      if \(bind\.isCustomClient\(\)\)\n        Align\(\n          alignment: Alignment\.center,\n          child: loadPowered\(context\),\n        \),\n/;
+  if (!re.test(s)) return s.includes('loadPowered(context)') ? null : s; // قبلاً حذف شده
+  return s.replace(re, '');
+}, 'Dart: remove "Powered by RustDesk" from desktop home');
 // ---- 2b) نوار تبلیغات در موبایل (اندروید/iOS): زیر صفحه‌ی فعال، بالای نوار پایین
 patch(p('flutter', 'lib', 'mobile', 'pages', 'home_page.dart'), (s) => {
   if (s.includes('RasaAdBanner')) return s;

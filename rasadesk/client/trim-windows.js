@@ -52,6 +52,21 @@ drop(/          - \{\n              target: aarch64-pc-windows-msvc,[\s\S]*?\n  
         uses: softprops/action-gh-release`);
 }
 
+// MSI با نام و تصاویر رسا ساخته شود: روی یک نسخه‌ی کپی، rustdesk.exe -> RasaDesk.exe (مثل کلاینت سفارشی) و تصاویر ویزارد
+{
+  const from = '          pushd ./res/msi\n          python preprocess.py --arp -d ../../rustdesk\n';
+  if ((s.split(from).length - 1) !== 1) throw new Error('msi preprocess step not found exactly once');
+  s = s.replace(from, [
+    '          Copy-Item -Recurse ./rustdesk ./rustdesk-ras',
+    '          Rename-Item ./rustdesk-ras/rustdesk.exe RasaDesk.exe',
+    '          New-Item -ItemType Directory -Force ./res/msi/Package/Resources | Out-Null',
+    '          Copy-Item ./rasadesk/client/branding/msi/*.bmp ./res/msi/Package/Resources/ -ErrorAction SilentlyContinue',
+    '          pushd ./res/msi',
+    '          python preprocess.py --arp -d ../../rustdesk-ras --app-name RasaDesk --manufacturer "Rasa Systems"',
+    '',
+  ].join('\n'));
+}
+
 // نام خروجی‌ها: rustdesk-<ver>-x86_64.exe/.msi  ->  rasadesk-<ver>-x86_64.exe/.msi
 const before = (s.match(/SignOutput\/rustdesk-/g) || []).length;
 if (before < 3) throw new Error('unexpected SignOutput references: ' + before);
