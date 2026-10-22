@@ -23,11 +23,14 @@ const Map<String, Map<String, String>> _kTr = {
   'es': {'ad': 'Publicidad', 'request': 'Anunciarse en Rasa Desk'},
 };
 
-/// نوار تبلیغات رسا دسک: آگهی‌ها را (بر اساس زبان کاربر) از سرور تبلیغات می‌گیرد و می‌چرخاند.
-/// هر آگهی می‌تواند بنر، متن و دامنه‌ی مقصد داشته باشد؛ متن و دامنه لینک مستقیم به سایت تبلیغ‌دهنده است.
-/// اگر سرور در دسترس نباشد یا آگهی‌ای نباشد، فقط لینک «درخواست تبلیغ» دیده می‌شود.
+/// نوار تبلیغات رسا دسک. دو جایگاه دارد:
+///  - slot 'bottom': نوار افقی پایین صفحه
+///  - slot 'side': ستون کنار (اگر آگهی نداشته باشد هیچ فضایی نمی‌گیرد)
+/// هر آگهی می‌تواند تصویر (PNG/JPG/GIF و WebP متحرک)، عنوان، متن، لینک مقصد و رنگ اختصاصی
+/// (پس‌زمینه، متن، لینک) داشته باشد؛ آگهی فقط‌متنی هم مجاز است. اگر آگهی رنگ نداشته باشد،
+/// از «تم پیش‌فرض» که در پنل مدیریت تنظیم می‌شود استفاده می‌شود.
+/// کلیک روی تصویر، متن یا دامنه، سایت تبلیغ‌دهنده را باز می‌کند (فقط اگر آگهی لینک داشته باشد).
 class RasaAdBanner extends StatefulWidget {
-  /// slot: 'bottom' (نوار افقی پایین صفحه) یا 'side' (ستون کنار، فقط وقتی آگهی داشته باشد)
   const RasaAdBanner({Key? key, this.slot = 'bottom'}) : super(key: key);
 
   final String slot;
@@ -38,6 +41,7 @@ class RasaAdBanner extends StatefulWidget {
 
 class _RasaAdBannerState extends State<RasaAdBanner> {
   List<Map<String, dynamic>> _ads = [];
+  Map<String, dynamic> _theme = {};
   String _requestUrl = kRasaRequestAdUrl;
   String _lang = 'en';
   int _index = 0;
@@ -87,7 +91,8 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
   Future<void> _load() async {
     try {
       final r = await http
-          .get(Uri.parse('$kRasaAdsBaseUrl/api/ads?lang=$_lang&slot=${widget.slot}'))
+          .get(Uri.parse(
+              '$kRasaAdsBaseUrl/api/ads?lang=$_lang&slot=${widget.slot}'))
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return;
       final j = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
@@ -112,6 +117,9 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
       setState(() {
         _ads = weighted;
         _index = 0;
+        _theme = (j['theme'] is Map)
+            ? Map<String, dynamic>.from(j['theme'] as Map)
+            : {};
         _requestUrl = (j['requestAdUrl'] ?? kRasaRequestAdUrl).toString();
       });
     } catch (_) {
@@ -126,23 +134,80 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
     }
   }
 
-  // ستون کنار: بدون آگهی هیچ فضایی نمی‌گیرد؛ تصویر متحرک (GIF/WebP) خودکار پخش می‌شود
-  Widget _buildSide(BuildContext context) {
-    if (_ads.isEmpty) return const SizedBox.shrink();
-    final scheme = Theme.of(context).colorScheme;
-    final muted = Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6);
-    final ad = _ads[_index % _ads.length];
-    final click = '$kRasaAdsBaseUrl${ad['link']}';
-    final image = (ad['image'] ?? '').toString();
+  // رنگ آگهی (یا تم پیش‌فرض)؛ فقط قالب #RRGGBB پذیرفته می‌شود
+  Color? _color(Map<String, dynamic> ad, String key) {
+    final own = (ad[key] ?? '').toString();
+    final v = own.isNotEmpty ? own : (_theme[key] ?? '').toString();
+    if (!RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(v)) return null;
+    return Color(int.parse('FF${v.substring(1)}', radix: 16));
+  }
+
+  Widget _media(String image, String click, bool hasLink, {double? height}) {
+    final img = ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Image.network(
+        '$kRasaAdsBaseUrl$image',
+        height: height,
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => SizedBox(height: height ?? 0),
+      ),
+    );
+    if (!hasLink) return img;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(onTap: () => _open(click), child: img),
+    );
+  }
+
+  // عنوان + متن + دامنه؛ کل خط قابل کلیک است (اگر لینک داشته باشد)
+  Widget _textLine(Map<String, dynamic> ad, String click, bool hasLink,
+      Color? fg, Color? accent, double size) {
     final title = (ad['title'] ?? '').toString();
     final text = (ad['text'] ?? '').toString();
     final host = (ad['host'] ?? '').toString();
     final line = [title, text].where((s) => s.isNotEmpty).join(' — ');
+    if (line.isEmpty && host.isEmpty) return const SizedBox.shrink();
+    final linkColor = accent ?? Theme.of(context).colorScheme.primary;
+    final w = Text.rich(
+      TextSpan(children: [
+        if (line.isNotEmpty) TextSpan(text: '$line  '),
+        if (host.isNotEmpty)
+          TextSpan(
+            text: host,
+            style: TextStyle(
+                color: linkColor, decoration: TextDecoration.underline),
+          ),
+      ]),
+      style: TextStyle(fontSize: size, color: fg),
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+    );
+    if (!hasLink) return w;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(onTap: () => _open(click), child: w),
+    );
+  }
+
+  // ستون کنار: بدون آگهی هیچ فضایی نمی‌گیرد؛ تصویر متحرک (GIF/WebP) خودکار پخش می‌شود
+  Widget _buildSide(BuildContext context) {
+    if (_ads.isEmpty) return const SizedBox.shrink();
+    final ad = _ads[_index % _ads.length];
+    final click = '$kRasaAdsBaseUrl${ad['link']}';
+    final image = (ad['image'] ?? '').toString();
+    final hasLink = (ad['host'] ?? '').toString().isNotEmpty;
+    final bg = _color(ad, 'bg');
+    final fg = _color(ad, 'fg');
+    final accent = _color(ad, 'accent');
+    final muted = fg?.withOpacity(0.6) ??
+        Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6);
     return Container(
       width: 200,
       margin: const EdgeInsets.all(8),
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
+        color: bg,
         border: Border.all(color: Colors.grey.withOpacity(0.25)),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -152,38 +217,11 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
         children: [
           Text(_t('ad'), style: TextStyle(fontSize: 11, color: muted)),
           const SizedBox(height: 6),
-          if (image.isNotEmpty)
-            InkWell(
-              onTap: () => _open(click),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: Image.network(
-                  '$kRasaAdsBaseUrl$image',
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
-              ),
-            ),
-          if (line.isNotEmpty || host.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: InkWell(
-                onTap: () => _open(click),
-                child: Text.rich(
-                  TextSpan(children: [
-                    if (line.isNotEmpty) TextSpan(text: '$line  '),
-                    if (host.isNotEmpty)
-                      TextSpan(
-                        text: host,
-                        style: TextStyle(
-                            color: scheme.primary,
-                            decoration: TextDecoration.underline),
-                      ),
-                  ]),
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ),
-            ),
+          if (image.isNotEmpty) _media(image, click, hasLink),
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _textLine(ad, click, hasLink, fg, accent, 12),
+          ),
         ],
       ),
     );
@@ -193,60 +231,31 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
   Widget build(BuildContext context) {
     if (widget.slot == 'side') return _buildSide(context);
     final scheme = Theme.of(context).colorScheme;
-    final muted = Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6);
+    final Map<String, dynamic> ad =
+        _ads.isNotEmpty ? _ads[_index % _ads.length] : <String, dynamic>{};
+    final bg = _color(ad, 'bg');
+    final fg = _color(ad, 'fg');
+    final accent = _color(ad, 'accent');
+    final muted = fg?.withOpacity(0.6) ??
+        Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.6);
     final children = <Widget>[];
     if (_ads.isNotEmpty) {
-      final ad = _ads[_index % _ads.length];
       final click = '$kRasaAdsBaseUrl${ad['link']}';
       final image = (ad['image'] ?? '').toString();
-      final title = (ad['title'] ?? '').toString();
-      final text = (ad['text'] ?? '').toString();
-      final host = (ad['host'] ?? '').toString();
+      final hasLink = (ad['host'] ?? '').toString().isNotEmpty;
       if (image.isNotEmpty) {
-        children.add(InkWell(
-          onTap: () => _open(click),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Image.network(
-              '$kRasaAdsBaseUrl$image',
-              height: 90,
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const SizedBox(height: 90),
-            ),
-          ),
-        ));
+        children.add(_media(image, click, hasLink, height: 90));
       }
-      // متن آگهی + دامنه‌ی مقصد به‌صورت لینک مستقیم به سایت تبلیغ‌دهنده
-      final line = [title, text].where((s) => s.isNotEmpty).join(' — ');
-      if (line.isNotEmpty || host.isNotEmpty) {
-        children.add(Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: InkWell(
-            onTap: () => _open(click),
-            child: Text.rich(
-              TextSpan(children: [
-                if (line.isNotEmpty) TextSpan(text: '$line  '),
-                if (host.isNotEmpty)
-                  TextSpan(
-                    text: host,
-                    style: TextStyle(
-                        color: scheme.primary,
-                        decoration: TextDecoration.underline),
-                  ),
-              ]),
-              style: const TextStyle(fontSize: 13),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ));
-      }
+      children.add(Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: _textLine(ad, click, hasLink, fg, accent, 13),
+      ));
     }
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
       decoration: BoxDecoration(
+        color: bg,
         border: Border(
             top: BorderSide(color: Colors.grey.withOpacity(0.25), width: 1)),
       ),
@@ -258,13 +267,16 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(_t('ad'), style: TextStyle(fontSize: 11, color: muted)),
-              InkWell(
-                onTap: () => _open(_requestUrl),
-                child: Text(_t('request'),
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: scheme.primary,
-                        decoration: TextDecoration.underline)),
+              MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: () => _open(_requestUrl),
+                  child: Text(_t('request'),
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: accent ?? scheme.primary,
+                          decoration: TextDecoration.underline)),
+                ),
               ),
             ],
           ),

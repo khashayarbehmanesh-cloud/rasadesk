@@ -95,6 +95,33 @@ patch(p('flutter', 'lib', 'mobile', 'pages', 'home_page.dart'), (s) => {
           ]),`);
 }, 'Dart: ad banner in mobile home_page');
 
+// ---- 2c) فونت Vazirmatn (مجوز OFL-1.1) برای ظاهر بهتر متن فارسی؛ فایل‌ها در branding/fonts/ (همراه OFL.txt)
+{
+  const fontSrc = path.join(__dirname, 'branding', 'fonts');
+  if (fs.existsSync(path.join(fontSrc, 'Vazirmatn-Regular.ttf'))) {
+    fs.mkdirSync(p('flutter', 'assets', 'fonts'), { recursive: true });
+    for (const name of fs.readdirSync(fontSrc)) fs.copyFileSync(path.join(fontSrc, name), p('flutter', 'assets', 'fonts', name));
+    patch(p('flutter', 'pubspec.yaml'), (s) => {
+      if (s.includes('family: Vazirmatn')) return s;
+      const re = /^  fonts:\n/m; // فقط خود کلید fonts (با ۲ فاصله)، نه خطوط تو‌رفته‌ی fonts:
+      if (!re.test(s)) return null;
+      return s.replace(re, (m) => m +
+        '    - family: Vazirmatn\n      fonts:\n        - asset: assets/fonts/Vazirmatn-Regular.ttf\n' +
+        '        - asset: assets/fonts/Vazirmatn-Medium.ttf\n          weight: 500\n' +
+        '        - asset: assets/fonts/Vazirmatn-Bold.ttf\n          weight: 700\n');
+    }, 'pubspec.yaml: Vazirmatn font');
+    patch(p('flutter', 'lib', 'common.dart'), (s) => {
+      if (s.includes("fontFamily: 'Vazirmatn'")) return s;
+      const l = '  static ThemeData lightTheme = ThemeData(\n';
+      const d = '  static ThemeData darkTheme = ThemeData(\n';
+      if (!s.includes(l) || !s.includes(d)) return null;
+      return s.replace(l, l + "    fontFamily: 'Vazirmatn',\n").replace(d, d + "    fontFamily: 'Vazirmatn',\n");
+    }, 'Dart: app theme font = Vazirmatn');
+  } else {
+    console.warn('! client/branding/fonts/ not found - default font stays.');
+  }
+}
+
 // ---- 3) نام محصول (Windows/Cargo)
 patch(p('Cargo.toml'), (s) => {
   const t = s
