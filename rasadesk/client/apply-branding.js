@@ -122,6 +122,70 @@ patch(p('flutter', 'lib', 'mobile', 'pages', 'home_page.dart'), (s) => {
   }
 }
 
+// ---- 2d) حذف نام و لینک RustDesk از رابط کاربری و آدرس‌های شبکه‌ای که ممکن است به سرورهای آن‌ها بروند
+// آدرس‌ها از brand.json: websiteUrl, privacyUrl, sourceUrl
+// توجه: متن مجوز AGPL، حق نشر نویسندگان اصلی و فایل LICENCE در سورس باید باقی بمانند (الزام قانونی).
+{
+  const site = brand.websiteUrl || '';
+  const privacy = brand.privacyUrl || site;
+  const source = brand.sourceUrl || site;
+  const shown = brand.displayName || brand.appName;
+  if (!site) {
+    console.warn('! brand.websiteUrl is empty - RustDesk links are NOT rewritten');
+  } else {
+    const rewriteUrls = (s) => s
+      .replace(/(['"])https?:\/\/(?:www\.)?rustdesk\.com\/privacy\.html\1/g, (m, q) => q + privacy + q)
+      .replace(/(['"])https?:\/\/(?:www\.)?rustdesk\.com[^'"\s]*\1/g, (m, q) => q + site + q)
+      .replace(/(['"])https?:\/\/github\.com\/rustdesk\/rustdesk[^'"\s]*\1/g, (m, q) => q + source + q);
+    const files = [
+      ['flutter', 'lib', 'common.dart'],
+      ['flutter', 'lib', 'common', 'widgets', 'toolbar.dart'],
+      ['flutter', 'lib', 'mobile', 'pages', 'settings_page.dart'],
+      ['flutter', 'lib', 'mobile', 'pages', 'connection_page.dart'],
+      ['flutter', 'lib', 'desktop', 'pages', 'install_page.dart'],
+      ['flutter', 'lib', 'desktop', 'pages', 'connection_page.dart'],
+      ['flutter', 'lib', 'desktop', 'pages', 'desktop_home_page.dart'],
+      ['flutter', 'lib', 'desktop', 'pages', 'desktop_setting_page.dart'],
+      ['src', 'client.rs'],
+    ];
+    for (const f of files) patch(p(...f), (s) => rewriteUrls(s), 'links rewritten: ' + f.slice(-1)[0]);
+
+    // صفحه «درباره»: نشانی حق نشر و مجوز (بدون نام RustDesk؛ اعلان AGPL و نشانی سورس حفظ می‌شود)
+    patch(p('flutter', 'lib', 'desktop', 'pages', 'desktop_setting_page.dart'), (s) => {
+      const old = "'Copyright © ${DateTime.now().toString().substring(0, 4)} Purslane Tech Pte. Ltd.\\n$license'";
+      const neu = "'© ${DateTime.now().toString().substring(0, 4)} " + shown + "\\nFree software under the GNU AGPL v3. Source code: " + source +
+        "\\nContains software © Purslane Tech Pte. Ltd. (AGPL v3)\\n$license'";
+      if (s.includes(old)) return s.replace(old, neu);
+      return s.includes('Free software under the GNU AGPL v3') ? s : null;
+    }, 'Dart: About page legal notice');
+
+    // نوار عنوان پنجره
+    patch(p('flutter', 'lib', 'desktop', 'widgets', 'tabbar_widget.dart'), (s) => {
+      const re = /const Text\(\s*"RustDesk",/;
+      if (!re.test(s)) return s.includes('"RustDesk"') ? null : s;
+      return s.replace(re, 'const Text(\n                              ' + JSON.stringify(shown) + ',');
+    }, 'Dart: window title text');
+  }
+
+  // آدرس پیش‌فرض سرور API (ثبت دستگاه/heartbeat) نباید به سرورهای RustDesk برود
+  patch(p('src', 'common.rs'), (s) => {
+    const a = '"https://admin.rustdesk.com".to_owned()';
+    if (s.includes(a)) return s.replace(a, '"".to_owned()');
+    return s.includes('admin.rustdesk.com".to_owned()') ? null : s;
+  }, 'common.rs: no default API server');
+}
+
+
+// پیوندهای مستندات داخل کتابخانه‌ی مشترک (زیرماژول)
+{
+  const cfgRs2 = p('libs', 'hbb_common', 'src', 'config.rs');
+  if (fs.existsSync(cfgRs2) && brand.websiteUrl) {
+    patch(cfgRs2, (s) => s
+      .replace(/(pub const LINK_DOCS_HOME: &str = )"[^"]*"/, '$1' + js(brand.websiteUrl))
+      .replace(/(pub const LINK_DOCS_X11_REQUIRED: &str = )"[^"]*"/, '$1' + js(brand.websiteUrl)),
+      'hbb_common: docs links');
+  }
+}
 // ---- 3) نام محصول (Windows/Cargo)
 patch(p('Cargo.toml'), (s) => {
   const t = s
