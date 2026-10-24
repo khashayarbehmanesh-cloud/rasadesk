@@ -186,6 +186,36 @@ patch(p('flutter', 'lib', 'mobile', 'pages', 'home_page.dart'), (s) => {
       'hbb_common: docs links');
   }
 }
+// ---- 2e) انتخاب زبان در صفحه اول (ستون چپ، زیر رمز) — پیش‌فرض = زبان ویندوز هر کاربر
+{
+  fs.copyFileSync(path.join(__dirname, 'rasa_lang_picker.dart'), path.join(p('flutter', 'lib', 'common', 'widgets'), 'rasa_lang_picker.dart'));
+  patch(p('flutter', 'lib', 'desktop', 'pages', 'desktop_home_page.dart'), (s) => {
+    if (s.includes('RasaLangPicker')) return s;
+    const a = '      if (!isOutgoingOnly) buildPasswordBoard(context),\n';
+    const imp = "import 'package:flutter_hbb/common/widgets/rasa_ad_banner.dart';";
+    if (!s.includes(a) || !s.includes(imp)) return null;
+    return s.replace(a, a + '      const RasaLangPicker(),\n')
+            .replace(imp, imp + "\nimport 'package:flutter_hbb/common/widgets/rasa_lang_picker.dart';");
+  }, 'Dart: language picker on home page');
+}
+
+// ---- 2f) شماره (ID) اختصاصی رسا دسک: شماره‌ی پیش‌فرض از آدرس MAC کارت شبکه ساخته می‌شود و در همه‌ی برنامه‌های مشابه روی یک سیستم یکی است.
+// با XOR یک عدد ثابتِ مخصوص رسا دسک، شماره متفاوت می‌شود (یک‌به‌یک؛ برخورد جدیدی ایجاد نمی‌کند).
+{
+  const cfgId = p('libs', 'hbb_common', 'src', 'config.rs');
+  if (fs.existsSync(cfgId)) {
+    let h = 0x811c9dc5;
+    for (const c of String(brand.idSaltSeed || brand.appName)) { h ^= c.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }
+    const salt = (h & 0x1FFFFFFF) | 1;
+    patch(cfgId, (s) => {
+      if (s.includes('RASA_ID_SALT')) return s;
+      const a = '                id &= 0x1FFFFFFF;\n';
+      if ((s.split(a).length - 1) !== 1) return null;
+      return s.replace(a, a + '                id ^= 0x' + salt.toString(16).toUpperCase() + '; // RASA_ID_SALT\n');
+    }, 'hbb_common: app-specific device ID (salt 0x' + salt.toString(16).toUpperCase() + ')');
+  }
+}
+
 // ---- 3) نام محصول (Windows/Cargo)
 patch(p('Cargo.toml'), (s) => {
   const t = s
