@@ -35,6 +35,8 @@ const replaceOnce = (re, to) => (s) => (re.test(s) ? s.replace(re, to) : null);
 const cfgDart = `// تولید شده توسط apply-branding.js - دستی ویرایش نکنید
 const String kRasaAdsBaseUrl = ${js(brand.adsBaseUrl.replace(/\/$/, ''))};
 const String kRasaRequestAdUrl = ${js(brand.requestAdUrl)};
+const int kRasaBuild = ${parseInt(process.env.GITHUB_RUN_NUMBER || brand.build || 0, 10) || 0};
+const String kRasaDownloadUrl = ${js(brand.downloadUrl || brand.websiteUrl || '')};
 `;
 const widgetsDir = p('flutter', 'lib', 'common', 'widgets');
 write(path.join(widgetsDir, 'rasa_config.dart'), cfgDart);
@@ -264,6 +266,34 @@ patch(p('flutter', 'lib', 'desktop', 'widgets', 'tabbar_widget.dart'), (s) => {
   if (s.includes(a)) return s.replace(a, 'this.showTitle = true,');
   return s.includes('this.showTitle = true,') ? s : null;
 }, 'Dart: show app name next to the window icon');
+
+// ---- 2j) اندازه‌ی پیش‌فرض پنجره‌ی اصلی: عریض‌تر تا ستون تبلیغات کنار جا شود (فقط برای نصب‌های تازه؛ اندازه‌ی ذخیره‌شده‌ی کاربر حفظ می‌شود)
+patch(p('flutter', 'windows', 'runner', 'main.cpp'), (s) => {
+  const a = 'Win32Window::Size size(800u, 600u);';
+  if (s.includes(a)) return s.replace(a, 'Win32Window::Size size(1000u, 660u);');
+  return s.includes('Win32Window::Size size(1000u,') ? s : null;
+}, 'main.cpp: default window 1000x660');
+
+// ---- 2k) ستون راست با دو جایگاه تبلیغ (بالا و پایین، برای دو مشتری مختلف). بدون آگهی هیچ فضایی نمی‌گیرد.
+patch(p('flutter', 'lib', 'desktop', 'pages', 'desktop_home_page.dart'), (s) => {
+  if (s.includes("RasaAdBanner(slot: 'side2')")) return s;
+  const a = "if (c.maxWidth >= 640) const RasaAdBanner(slot: 'side'),";
+  if (!s.includes(a)) return null;
+  return s.replace(a, "if (c.maxWidth >= 640)\n                    SingleChildScrollView(\n                      child: Column(\n                        mainAxisSize: MainAxisSize.min,\n                        crossAxisAlignment: CrossAxisAlignment.start,\n                        children: const [\n                          RasaAdBanner(slot: 'side'),\n                          RasaAdBanner(slot: 'side2'),\n                        ],\n                      ),\n                    ),");
+}, 'Dart: two ad slots in the right column');
+
+// ---- 2l) اعلان و اجبار به‌روزرسانی (شماره‌ی ساخت = GITHUB_RUN_NUMBER؛ سرور آخرین/حداقل نسخه را اعلام می‌کند)
+fs.copyFileSync(path.join(__dirname, 'rasa_update.dart'), path.join(p('flutter', 'lib', 'common', 'widgets'), 'rasa_update.dart'));
+patch(p('flutter', 'lib', 'desktop', 'pages', 'desktop_home_page.dart'), (s) => {
+  if (s.includes('RasaUpdateGate')) return s;
+  const a = '    return _buildBlock(\n        child: Row(';
+  const b = '        if (!isIncomingOnly) Expanded(child: buildRightPane(context)),\n      ],\n    ));\n  }';
+  const imp = "import 'package:flutter_hbb/common/widgets/rasa_ad_banner.dart';";
+  if (!s.includes(a) || !s.includes(b) || !s.includes(imp)) return null;
+  return s.replace(a, '    return RasaUpdateGate(child: _buildBlock(\n        child: Row(')
+          .replace(b, '        if (!isIncomingOnly) Expanded(child: buildRightPane(context)),\n      ],\n    )));\n  }')
+          .replace(imp, imp + "\nimport 'package:flutter_hbb/common/widgets/rasa_update.dart';");
+}, 'Dart: update notice / forced update gate');
 
 // ---- 3) نام محصول (Windows/Cargo)
 patch(p('Cargo.toml'), (s) => {

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -54,6 +55,7 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
     _rotate = Timer.periodic(const Duration(seconds: 15), (_) {
       if (_ads.length > 1 && mounted) {
         setState(() => _index = (_index + 1) % _ads.length);
+        _reportView();
       }
     });
     _refresh = Timer.periodic(const Duration(minutes: 30), (_) => _load());
@@ -88,43 +90,101 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
 
   String _t(String k) => (_kTr[_lang] ?? _kTr['en']!)[k] ?? _kTr['en']![k]!;
 
+  // نمایش واقعی: هر آگهی حداکثر هر ۱۰ دقیقه یک بار (در سرور هم ۵ دقیقه برای هر کاربر)
+  final Map<int, DateTime> _viewed = {};
+
+  String get _listFile => 'ads-${widget.slot}-$_lang.json';
+
+  String get _etagFile => 'ads-${widget.slot}-$_lang.etag';
+
   Future<void> _load() async {
+    Map<String, dynamic>? j;
+    var unchanged = false;
     try {
-      final r = await http
-          .get(Uri.parse(
-              '$kRasaAdsBaseUrl/api/ads?lang=$_lang&slot=${widget.slot}'))
-          .timeout(const Duration(seconds: 8));
-      if (r.statusCode != 200) return;
-      final j = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
-      final list = (j['ads'] as List? ?? [])
-          .whereType<Map>()
-          .map((e) => Map<String, dynamic>.from(e))
-          .where((a) =>
-              (a['image'] ?? '').toString().isNotEmpty ||
-              (a['text'] ?? '').toString().isNotEmpty ||
-              (a['title'] ?? '').toString().isNotEmpty)
-          .toList();
-      // وزن بیشتر = تکرار بیشتر در چرخش
-      final weighted = <Map<String, dynamic>>[];
-      for (final a in list) {
-        final w = ((a['weight'] ?? 1) as num).toInt().clamp(1, 10);
-        for (var i = 0; i < w; i++) {
-          weighted.add(a);
-        }
+      // اگر فهرست قبلی ذخیره شده، شناسه‌ی آن را می‌فرستیم؛ سرور اگر چیزی عوض نشده باشد ۳۰۴ می‌دهد
+      final cachedText = await _AdCache.readText(_listFile);
+      final etag = await _AdCache.readText(_etagFile);
+      final headers = <String, String>{};
+      if (cachedText != null && etag != null && etag.isNotEmpty) {
+        headers['If-None-Match'] = etag;
       }
-      weighted.shuffle();
-      if (!mounted) return;
-      setState(() {
-        _ads = weighted;
-        _index = 0;
-        _theme = (j['theme'] is Map)
-            ? Map<String, dynamic>.from(j['theme'] as Map)
-            : {};
-        _requestUrl = (j['requestAdUrl'] ?? kRasaRequestAdUrl).toString();
-      });
-    } catch (_) {
-      // بدون اینترنت یا سرور خاموش: بی‌صدا نادیده گرفته می‌شود
+      final r = await http
+          .get(
+              Uri.parse(
+                  '$kRasaAdsBaseUrl/api/ads?lang=$_lang&slot=${widget.slot}&v=2'),
+              headers: headers)
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode == 304 && cachedText != null) {
+        j = jsonDecode(cachedText) as Map<String, dynamic>;
+        unchanged = true;
+        unawaited(_AdCache.saveText(_listFile, cachedText)); // تازه‌سازی زمان ذخیره
+      } else if (r.statusCode == 200) {
+        final text = utf8.decode(r.bodyBytes);
+        j = jsonDecode(text) as Map<String, dynamic>;
+        unawaited(_AdCache.saveText(_listFile, text));
+        unawaited(_AdCache.saveText(_etagFile, r.headers['etag'] ?? ''));
+      }
+    } catch (_) {}
+    // سرور در دسترس نبود: آخرین فهرست ذخیره‌شده (حداکثر ۳ روز قدمت) تا آگهی‌ها بدون اینترنت هم دیده شوند
+    if (j == null) {
+      try {
+        final text =
+            await _AdCache.readText(_listFile, maxAge: const Duration(days: 3));
+        if (text != null) j = jsonDecode(text) as Map<String, dynamic>;
+      } catch (_) {}
     }
+    if (j == null || !mounted) return;
+    // بدون تغییر و فهرست فعلی همان است: دوباره چیدن/به‌هم‌ریختن نمی‌کنیم
+    if (unchanged && _ads.isNotEmpty) return;
+    _apply(j);
+  }
+
+  void _apply(Map<String, dynamic> j) {
+    final list = (j['ads'] as List? ?? [])
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .where((a) =>
+            (a['image'] ?? '').toString().isNotEmpty ||
+            (a['text'] ?? '').toString().isNotEmpty ||
+            (a['title'] ?? '').toString().isNotEmpty)
+        .toList();
+    // وزن بیشتر = تکرار بیشتر در چرخش
+    final weighted = <Map<String, dynamic>>[];
+    for (final a in list) {
+      final w = ((a['weight'] ?? 1) as num).toInt().clamp(1, 10);
+      for (var i = 0; i < w; i++) {
+        weighted.add(a);
+      }
+    }
+    weighted.shuffle();
+    setState(() {
+      _ads = weighted;
+      _index = 0;
+      _theme = (j['theme'] is Map)
+          ? Map<String, dynamic>.from(j['theme'] as Map)
+          : {};
+      _requestUrl = (j['requestAdUrl'] ?? kRasaRequestAdUrl).toString();
+    });
+    _reportView();
+  }
+
+  void _reportView() {
+    if (_ads.isEmpty) return;
+    final ad = _ads[_index % _ads.length];
+    final id = (ad['id'] as num?)?.toInt();
+    if (id == null) return;
+    final last = _viewed[id];
+    if (last != null && DateTime.now().difference(last).inMinutes < 10) return;
+    _viewed[id] = DateTime.now();
+    unawaited(() async {
+      try {
+        await http
+            .post(Uri.parse('$kRasaAdsBaseUrl/api/view'),
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({'id': id}))
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {}
+    }());
   }
 
   void _open(String url) {
@@ -145,12 +205,7 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
   Widget _media(String image, String click, bool hasLink, {double? height}) {
     final img = ClipRRect(
       borderRadius: BorderRadius.circular(6),
-      child: Image.network(
-        '$kRasaAdsBaseUrl$image',
-        height: height,
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => SizedBox(height: height ?? 0),
-      ),
+      child: _AdImage(url: '$kRasaAdsBaseUrl$image', height: height),
     );
     if (!hasLink) return img;
     return MouseRegion(
@@ -229,7 +284,7 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.slot == 'side') return _buildSide(context);
+    if (widget.slot == 'side' || widget.slot == 'side2') return _buildSide(context);
     final scheme = Theme.of(context).colorScheme;
     final Map<String, dynamic> ad =
         _ads.isNotEmpty ? _ads[_index % _ads.length] : <String, dynamic>{};
@@ -283,5 +338,141 @@ class _RasaAdBannerState extends State<RasaAdBanner> {
         ],
       ),
     );
+  }
+}
+
+/// کش دیسک: هر تصویر یک نام یکتا (تصادفی) دارد؛ اگر مدیر تصویر را عوض کند نام فایل عوض می‌شود
+/// و کش قدیمی خودبه‌خود کنار گذاشته می‌شود. فایل‌هایی که ۱۴ روز استفاده نشده باشند پاک می‌شوند.
+class _AdCache {
+  static Directory? _dir;
+
+  static Future<Directory> dir() async {
+    final cached = _dir;
+    if (cached != null) return cached;
+    final sep = Platform.pathSeparator;
+    final base = Platform.isWindows
+        ? (Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path)
+        : (Platform.environment['XDG_CACHE_HOME'] ??
+            '${Platform.environment['HOME'] ?? Directory.systemTemp.path}/.cache');
+    final d = Directory('$base${sep}RasaDesk${sep}adcache');
+    await d.create(recursive: true);
+    _dir = d;
+    unawaited(_cleanup(d));
+    return d;
+  }
+
+  static Future<void> _cleanup(Directory d) async {
+    try {
+      final cutoff = DateTime.now().subtract(const Duration(days: 14));
+      await for (final e in d.list()) {
+        if (e is File && (await e.lastModified()).isBefore(cutoff)) {
+          await e.delete();
+        }
+      }
+    } catch (_) {}
+  }
+
+  static String _safe(String s) => s.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+
+  static Future<void> saveText(String name, String text) async {
+    try {
+      final d = await dir();
+      await File('${d.path}${Platform.pathSeparator}${_safe(name)}')
+          .writeAsString(text);
+    } catch (_) {}
+  }
+
+  static Future<String?> readText(String name, {Duration? maxAge}) async {
+    try {
+      final d = await dir();
+      final f = File('${d.path}${Platform.pathSeparator}${_safe(name)}');
+      if (!await f.exists()) return null;
+      if (maxAge != null &&
+          DateTime.now().difference(await f.lastModified()) > maxAge) {
+        return null;
+      }
+      return await f.readAsString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// فایل کش‌شده‌ی تصویر؛ اگر نبود دانلود و ذخیره می‌شود. null = ناموفق
+  static Future<File?> get(String url) async {
+    try {
+      final d = await dir();
+      final f = File('${d.path}${Platform.pathSeparator}${_safe(url)}');
+      if (await f.exists() && await f.length() > 0) {
+        await f.setLastModified(DateTime.now());
+        return f;
+      }
+      final r =
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 25));
+      if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
+      final tmp = File('${f.path}.part');
+      await tmp.writeAsBytes(r.bodyBytes, flush: true);
+      await tmp.rename(f.path);
+      return f;
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+class _AdImage extends StatefulWidget {
+  const _AdImage({Key? key, required this.url, this.height}) : super(key: key);
+
+  final String url;
+  final double? height;
+
+  @override
+  State<_AdImage> createState() => _AdImageState();
+}
+
+class _AdImageState extends State<_AdImage> {
+  File? _file;
+  bool _fallback = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolve();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AdImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _file = null;
+      _fallback = false;
+      _resolve();
+    }
+  }
+
+  Future<void> _resolve() async {
+    final url = widget.url;
+    final f = await _AdCache.get(url);
+    if (!mounted || url != widget.url) return;
+    setState(() {
+      _file = f;
+      _fallback = f == null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final h = widget.height;
+    final empty = SizedBox(height: h ?? 0);
+    final file = _file;
+    if (file != null) {
+      return Image.file(file,
+          height: h, fit: BoxFit.contain, errorBuilder: (_, __, ___) => empty);
+    }
+    if (_fallback) {
+      // کش دیسک در دسترس نبود: مثل قبل مستقیم از اینترنت
+      return Image.network(widget.url,
+          height: h, fit: BoxFit.contain, errorBuilder: (_, __, ___) => empty);
+    }
+    return SizedBox(height: h ?? 60);
   }
 }
