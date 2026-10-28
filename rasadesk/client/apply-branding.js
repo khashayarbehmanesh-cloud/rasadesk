@@ -216,6 +216,47 @@ patch(p('flutter', 'lib', 'mobile', 'pages', 'home_page.dart'), (s) => {
   }
 }
 
+// ---- 2g) پیام «ready, for faster connection, please set up your own server»: برنامه چون سرور داخلی (compile-time) را «سرور سفارشی» نمی‌داند، فکر می‌کند از سرور عمومی استفاده می‌کند
+patch(p('src', 'common.rs'), (s) => {
+  const re = /pub fn using_public_server\(\) -> bool \{\n    crate::get_custom_rendezvous_server\(get_option\("custom-rendezvous-server"\)\)\.is_empty\(\)\n\}/;
+  if (re.test(s)) return s.replace(re, 'pub fn using_public_server() -> bool {\n    false // RasaDesk: always uses its own built-in server\n}');
+  return s.includes('RasaDesk: always uses its own built-in server') ? s : null;
+}, 'common.rs: never report "public server"');
+
+// ---- 2h) اطلاعات فایل (Properties > Details و راهنمای نوار وظیفه): نام شرکت، محصول، توضیح و حق نشر در همه‌ی exe ها
+// فقط ASCII در Runner.rc تا مشکل کدگذاری نداشته باشیم. اعلان حق نشر نویسندگان اصلی (AGPL) حفظ می‌شود.
+{
+  const company = brand.publisher || brand.company || brand.displayName;
+  const prod = brand.displayName || brand.appName;
+  const desc = brand.description || (prod + ' Remote Desktop');
+  const copy = brand.copyright || ('Copyright (c) ' + company + '. Contains AGPL-3.0 software (c) Purslane Tech Pte. Ltd.');
+  const exe = brand.appName + '.exe';
+  const tomlFix = (s) => {
+    let t = s
+      .replace(/^description = ".*"$/m, 'description = ' + js(desc))
+      .replace(/^ProductName = ".*"$/m, 'ProductName = ' + js(prod))
+      .replace(/^FileDescription = ".*"$/m, 'FileDescription = ' + js(desc))
+      .replace(/^OriginalFilename = ".*"$/m, 'OriginalFilename = ' + js(exe))
+      .replace(/^LegalCopyright = ".*"$/m, 'LegalCopyright = ' + js(copy));
+    if (!/^CompanyName = /m.test(t)) t = t.replace(/^(LegalCopyright = .*)$/m, '$1\nCompanyName = ' + js(company));
+    else t = t.replace(/^CompanyName = ".*"$/m, 'CompanyName = ' + js(company));
+    return t;
+  };
+  patch(p('libs', 'portable', 'Cargo.toml'), tomlFix, 'portable packer: file properties');
+  patch(p('Cargo.toml'), (s) => {
+    // فقط بخش [package.metadata.winres] را تغییر بده
+    const i = s.indexOf('[package.metadata.winres]');
+    if (i < 0) return null;
+    return s.slice(0, i) + tomlFix(s.slice(i));
+  }, 'Cargo.toml: winres file properties');
+  patch(p('flutter', 'windows', 'runner', 'Runner.rc'), (s) => s
+    .replace(/VALUE "CompanyName", ".*?" "\\0"/, 'VALUE "CompanyName", ' + js(company) + ' "\\0"')
+    .replace(/VALUE "InternalName", ".*?" "\\0"/, 'VALUE "InternalName", ' + js(brand.appName) + ' "\\0"')
+    .replace(/VALUE "LegalCopyright", ".*?" "\\0"/, 'VALUE "LegalCopyright", ' + js(copy) + ' "\\0"')
+    .replace(/VALUE "OriginalFilename", ".*?" "\\0"/, 'VALUE "OriginalFilename", ' + js(exe) + ' "\\0"'),
+    'Runner.rc: company, copyright, internal name');
+}
+
 // ---- 3) نام محصول (Windows/Cargo)
 patch(p('Cargo.toml'), (s) => {
   const t = s

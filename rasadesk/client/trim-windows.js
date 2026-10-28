@@ -62,7 +62,7 @@ drop(/          - \{\n              target: aarch64-pc-windows-msvc,[\s\S]*?\n  
     '          New-Item -ItemType Directory -Force ./res/msi/Package/Resources | Out-Null',
     '          Copy-Item ./rasadesk/client/branding/msi/*.bmp ./res/msi/Package/Resources/ -ErrorAction SilentlyContinue',
     '          pushd ./res/msi',
-    '          python preprocess.py --arp -d ../../rustdesk-ras --app-name RasaDesk --manufacturer "Rasa Systems"',
+    '          python preprocess.py --arp -d ../../rustdesk-ras --app-name RasaDesk --manufacturer "Rasa System Advisors Co"',
     '',
   ].join('\n'));
 }
