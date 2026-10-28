@@ -134,6 +134,7 @@ patch(p('flutter', 'lib', 'mobile', 'pages', 'home_page.dart'), (s) => {
     console.warn('! brand.websiteUrl is empty - RustDesk links are NOT rewritten');
   } else {
     const rewriteUrls = (s) => s
+      .replace(/(['"])https?:\/\/(?:www\.)?rustdesk\.com\/download[^'"\s]*\1/g, (m, q) => q + (brand.downloadUrl || site) + q)
       .replace(/(['"])https?:\/\/(?:www\.)?rustdesk\.com\/privacy\.html\1/g, (m, q) => q + privacy + q)
       .replace(/(['"])https?:\/\/(?:www\.)?rustdesk\.com[^'"\s]*\1/g, (m, q) => q + site + q)
       .replace(/(['"])https?:\/\/github\.com\/rustdesk\/rustdesk[^'"\s]*\1/g, (m, q) => q + source + q);
@@ -256,6 +257,13 @@ patch(p('src', 'common.rs'), (s) => {
     .replace(/VALUE "OriginalFilename", ".*?" "\\0"/, 'VALUE "OriginalFilename", ' + js(exe) + ' "\\0"'),
     'Runner.rc: company, copyright, internal name');
 }
+
+// ---- 2i) نام برنامه کنار آیکون در نوار عنوان پنجره (به‌طور پیش‌فرض فقط آیکون نشان داده می‌شد)
+patch(p('flutter', 'lib', 'desktop', 'widgets', 'tabbar_widget.dart'), (s) => {
+  const a = 'this.showTitle = false,';
+  if (s.includes(a)) return s.replace(a, 'this.showTitle = true,');
+  return s.includes('this.showTitle = true,') ? s : null;
+}, 'Dart: show app name next to the window icon');
 
 // ---- 3) نام محصول (Windows/Cargo)
 patch(p('Cargo.toml'), (s) => {
