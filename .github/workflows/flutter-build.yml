@@ -418,6 +418,9 @@ jobs:
           Rename-Item ./rustdesk-ras/rustdesk.exe RasaDesk.exe
           New-Item -ItemType Directory -Force ./res/msi/Package/Resources | Out-Null
           Copy-Item ./rasadesk/client/branding/msi/*.bmp ./res/msi/Package/Resources/ -ErrorAction SilentlyContinue
+          # upgrade over a running copy: skip the files-in-use check so no reboot is requested;
+          # the old package stops the service and closes the app itself before files are replaced
+          $p = './res/msi/Package/Package.wxs'; $t = [IO.File]::ReadAllText($p); $o = '<InstallValidate Condition="NOT Installed" />'; if (-not $t.Contains($o)) { throw 'InstallValidate anchor missing' }; [IO.File]::WriteAllText($p, $t.Replace($o, '<InstallValidate Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />'))
           pushd ./res/msi
           python preprocess.py --arp -d ../../rustdesk-ras --app-name RasaDesk --manufacturer "Rasa System Advisors Co"
           nuget restore msi.sln
