@@ -85,5 +85,32 @@ patch(path.join(kt, 'BootReceiver.kt'), (s) => {
   }
 }
 
+// 6) نسخه‌ی «فقط کنترل‌کننده» (RASA_ANDROID_VIEWER=1): از گوشی فقط می‌شود به رایانه وصل شد.
+// حالت outgoing-only خود RustDesk صفحه‌ی اشتراک و چت را از برنامه حذف می‌کند؛ سرویس‌ها و مجوزهای حساس
+// (دسترسی‌پذیری، نمایش روی برنامه‌ها، ضبط صفحه/صدا، راه‌اندازی خودکار) هم از Manifest برداشته می‌شوند.
+if (process.env.RASA_ANDROID_VIEWER === '1') {
+  patch(p('libs', 'hbb_common', 'src', 'config.rs'), (s) => {
+    const a = 'pub static ref HARD_SETTINGS: RwLock<HashMap<String, String>> = Default::default();';
+    const b = 'pub static ref HARD_SETTINGS: RwLock<HashMap<String, String>> = RwLock::new(HashMap::from([("conn-type".to_owned(), "outgoing".to_owned())]));';
+    if (s.includes(a)) return s.replace(a, b);
+    return s.includes('("conn-type".to_owned(), "outgoing".to_owned())') ? s : null;
+  }, 'Android viewer: outgoing-only mode');
+
+  patch(path.join(main, 'AndroidManifest.xml'), (s) => {
+    let t = s;
+    const cut = (re, label) => { if (!re.test(t)) { if (/INPUT_REMOVED/.test(t)) return; throw new Error('manifest block not found: ' + label); } t = t.replace(re, ''); };
+    try {
+      cut(/\s*<receiver\s+android:name="\.BootReceiver"[\s\S]*?<\/receiver>/, 'BootReceiver');
+      cut(/\s*<service\s+android:name="\.InputService"[\s\S]*?<\/service>/, 'InputService');
+      cut(/\s*<service\s+android:name="\.MainService"[\s\S]*?<\/service>/, 'MainService');
+      cut(/\s*<service\s+android:name="\.FloatingWindowService"[^>]*\/>/, 'FloatingWindowService');
+    } catch (e) { console.error('✗ ' + e.message); return null; }
+    for (const perm of ['SYSTEM_ALERT_WINDOW', 'RECORD_AUDIO', 'RECEIVE_BOOT_COMPLETED', 'REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
+      'FOREGROUND_SERVICE_MEDIA_PROJECTION', 'FOREGROUND_SERVICE_MICROPHONE', 'FOREGROUND_SERVICE_SPECIAL_USE', 'FOREGROUND_SERVICE']) {
+      t = t.replace(new RegExp('\\s*<uses-permission android:name="android\\.permission\\.' + perm + '"\\s*/>'), '');
+    }
+    return /InputService|MainService|BootReceiver|FloatingWindowService|SYSTEM_ALERT_WINDOW|BIND_ACCESSIBILITY_SERVICE/.test(t) ? null : t;
+  }, 'Android viewer: services and sensitive permissions removed from manifest');
+}
 if (problems) { console.error(`\n${problems} problem(s)`); process.exit(1); }
 console.log('\nOK — Android branding applied (applicationId ' + appId + ')');
