@@ -295,6 +295,30 @@ patch(p('flutter', 'lib', 'desktop', 'pages', 'desktop_home_page.dart'), (s) => 
           .replace(imp, imp + "\nimport 'package:flutter_hbb/common/widgets/rasa_update.dart';");
 }, 'Dart: update notice / forced update gate');
 
+// ---- 2m) شماره‌ی ساخت کنار نسخه در «درباره» (دسکتاپ و موبایل) برای پشتیبانی
+{
+  const imp = "import 'package:flutter/material.dart';";
+  const rimp = "import 'package:flutter_hbb/common/widgets/rasa_config.dart';";
+  const withImport = (t) => (t.includes(rimp) ? t : t.replace(imp, imp + '\n' + rimp));
+  patch(p('flutter', 'lib', 'desktop', 'pages', 'desktop_setting_page.dart'), (s) => {
+    if (s.includes('$version (build $kRasaBuild)')) return s;
+    const a = "Text('${translate('Version')}: $version')";
+    if (!s.includes(a)) return null;
+    return withImport(s.replace(a, "Text('${translate('Version')}: $version (build $kRasaBuild)')"));
+  }, 'Dart: build number in desktop About');
+  patch(p('flutter', 'lib', 'mobile', 'pages', 'settings_page.dart'), (s) => {
+    if (s.includes('$version (build $kRasaBuild)')) return s;
+    const a = "Text('Version: $version')";
+    if (!s.includes(a)) return null;
+    let t = s.replace(a, "Text('Version: $version (build $kRasaBuild)')");
+    if (brand.websiteUrl) {
+      let host = brand.websiteUrl;
+      try { host = new URL(brand.websiteUrl).host; } catch (e) { /* keep as is */ }
+      t = t.split("Text('rustdesk.com',").join('Text(' + js(host) + ',');
+    }
+    return withImport(t);
+  }, 'Dart: build number + site text in mobile About');
+}
 // ---- 3) نام محصول (Windows/Cargo)
 patch(p('Cargo.toml'), (s) => {
   const t = s
