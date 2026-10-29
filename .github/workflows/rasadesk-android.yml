@@ -2,6 +2,11 @@ name: RasaDesk - Android build
 
 on:
   workflow_dispatch:
+    inputs:
+      viewer_only:
+        description: 'Viewer-only build (no screen sharing / accessibility / overlay permissions)'
+        type: boolean
+        default: true
 
 env:
   RUST_VERSION: "1.75"
@@ -100,6 +105,8 @@ jobs:
           submodules: recursive
 
       - name: Apply RasaDesk branding
+        env:
+          RASA_ANDROID_VIEWER: ${{ inputs.viewer_only && '1' || '0' }}
         run: |
           node rasadesk/client/apply-branding.js . rasadesk/client/brand.json
           node rasadesk/client/apply-branding-android.js . rasadesk/client/brand.json
@@ -283,19 +290,19 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rasadesk-android-${{ matrix.job.arch }}-signing-failed
+          name: rasadesk-android-${{ matrix.job.arch }}${{ inputs.viewer_only && '-viewer' || '' }}-signing-failed
           path: signed-apk/rasadesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
 
       - name: Upload signed APK
         if: env.ANDROID_SIGNING_KEY != null
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rasadesk-android-${{ matrix.job.arch }}
+          name: rasadesk-android-${{ matrix.job.arch }}${{ inputs.viewer_only && '-viewer' || '' }}
           path: ${{steps.sign-rustdesk.outputs.signedReleaseFile}}
 
       - name: Upload UNSIGNED APK (signing secrets missing)
         if: env.ANDROID_SIGNING_KEY == null
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rasadesk-android-${{ matrix.job.arch }}-UNSIGNED
+          name: rasadesk-android-${{ matrix.job.arch }}${{ inputs.viewer_only && '-viewer' || '' }}-UNSIGNED
           path: signed-apk/rasadesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
