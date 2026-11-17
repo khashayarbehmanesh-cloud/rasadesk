@@ -364,7 +364,7 @@ patch(p('src', 'client.rs'), (s) => {
 // ---- 5) آیکون‌ها (اختیاری): فایل‌ها را در client/branding/ بگذارید
 const bdir = path.join(__dirname, 'branding');
 const iconMap = [
-  ['icon.ico', ['res', 'icon.ico']], ['icon.ico', ['flutter', 'windows', 'runner', 'resources', 'app_icon.ico']],
+  ['icon.ico', ['res', 'icon.ico']], ['icon.ico', ['res', 'tray-icon.ico']], ['icon.ico', ['flutter', 'windows', 'runner', 'resources', 'app_icon.ico']],
   ['icon.png', ['res', 'icon.png']], ['icon.png', ['res', 'mac-icon.png']],
   ['32x32.png', ['res', '32x32.png']], ['64x64.png', ['res', '64x64.png']],
   ['128x128.png', ['res', '128x128.png']], ['icon.png', ['res', '128x128@2x.png']],
